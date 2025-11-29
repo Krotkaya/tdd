@@ -4,9 +4,7 @@ namespace TagCloud;
 public class CircularCloudLayouter(Point center)
 {
     private readonly List<Rectangle> _rectangles = [];
-    private double _angle;
-    private const double AngleStep = 0.1;//их лучше в дальнейшем протестировать и возможно подобрать другие значения
-    private const double RadiusStep = 0.5;//их лучше в дальнейшем протестировать и возможно подобрать другие значения
+    private readonly ArchimedeanSpiralPointGenerator _generator = new(center);
 
     public IReadOnlyCollection<Rectangle> Rectangles => _rectangles.AsReadOnly();
     
@@ -41,7 +39,7 @@ public class CircularCloudLayouter(Point center)
     {
         while (true)
         {
-            var pointOnSpiral = GetNextPointOnSpiral();
+            var pointOnSpiral = _generator.GetNextPointOnSpiral();
             var rectangle = CreateRectangleWithCenter(pointOnSpiral, size);
 
             if (!_rectangles.Any(r => r.IntersectsWith(rectangle)))
@@ -88,15 +86,5 @@ public class CircularCloudLayouter(Point center)
             dy = 1;
 
         return new Point(dx, dy);
-    }
-    
-    private Point GetNextPointOnSpiral()
-    {
-        var radius = RadiusStep * _angle;
-        var x = center.X + (int)Math.Round(radius * Math.Cos(_angle));
-        var y = center.Y + (int)Math.Round(radius * Math.Sin(_angle));
-
-        _angle += AngleStep;
-        return new Point(x, y);
     }
 }
