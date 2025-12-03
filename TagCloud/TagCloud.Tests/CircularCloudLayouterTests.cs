@@ -1,19 +1,45 @@
 using System.Drawing;
 using FluentAssertions;
+using NUnit.Framework.Interfaces;
+using TagCloud.Creators;
+using TagCloud.Shapes;
+using TagCloud.SpiralGenerators;
+using TagCloud.Visualization;
 
 namespace TagCloud.Tests;
-
 [TestFixture]
 public class CircularCloudLayouterTests
 {
+    private const int ImageWidth = 1000;
+    private const int ImageHeight = 1000;
     private CircularCloudLayouter _layouter;
     private Point _center;
+    private ISpiralPointGenerator _archimedeanGenerator;
+    private ICloudShapeCreator _shapeCreator;
+    private string _failDirectory;
 
     [SetUp]
     public void SetUp()
     {
         _center = new Point(100, 100);
-        _layouter = new CircularCloudLayouter(_center);
+        _archimedeanGenerator = new ArchimedeanSpiralPointGenerator(_center);
+        _shapeCreator = new RectangleCloudShapeCreator();
+        _layouter = new CircularCloudLayouter(_center, _archimedeanGenerator, _shapeCreator);
+        
+        var baseDirectory = AppContext.BaseDirectory; 
+        var solutionRoot = FindSolutionRoot(baseDirectory);
+        _failDirectory = Path.Combine(solutionRoot, "TagCloud.Visualization",
+            "FailedClouds");
+        Directory.CreateDirectory(_failDirectory);
+    }
+    
+    private static string FindSolutionRoot(string start)
+    {
+        var directory = new DirectoryInfo(start);
+        while (directory is not null && directory.GetFiles("TagCloud.sln").Length == 0)
+            directory = directory.Parent;
+
+        return directory?.FullName ?? throw new InvalidOperationException("Solution root not found");
     }
 
     [TestCase(-1, -10, 
@@ -24,11 +50,11 @@ public class CircularCloudLayouterTests
         TestName = "Должен бросать исключение если высота равна нулю")]
     [TestCase(0, 0,    
         TestName = "Должен бросать исключение если ширина и высота равны нулю")]
-    public void PutNextRectangle_ShouldThrowException_SizeIsNonPositive(int width, int height)
+    public void PutNextShape_ShouldThrowException_SizeIsNonPositive(int width, int height)
     {
         var size = new Size(width, height);
         
-        var action = () => _layouter.PutNextRectangle(size);
+        Action action = () => _layouter.PutNextShape(size);
         
         action
             .Should()
@@ -41,16 +67,13 @@ public class CircularCloudLayouterTests
         TestName = "Первый прямоугольник 1x1 должен быть размещен строго в центре")]
     [TestCase(50, 30, 
         TestName = "Первый прямоугольник 50x30 должен быть размещен строго в центре")]
-    public void PutNextRectangle_ShouldPlaceInCenter_FirstRectangle(int width, int height)
+    public void PutNextShape_ShouldPlaceInCenter_FirstRectangle(int width, int height)
     {
         var size = new Size(width, height);
-        
-        var rectangle = _layouter.PutNextRectangle(size);
-        var rectangleCenter = new Point(
-            rectangle.Left + rectangle.Width / 2,
-            rectangle.Top + rectangle.Height / 2);
-        
-        rectangleCenter
+
+        var shape = _layouter.PutNextShape(size);
+
+        shape.Center
             .Should()
             .Be(_center);
     }
@@ -69,18 +92,18 @@ public class CircularCloudLayouterTests
         var size = new Size(width, height);
         
         for (var i = 0; i < rectanglesCount; i++)
-            _layouter.PutNextRectangle(size);
+            _layouter.PutNextShape(size);
 
-        var rectangles = _layouter.Rectangles.ToArray();
-        
-        for (var i = 0; i < rectangles.Length; i++)
+        var shapes = _layouter.Shapes.ToArray();
+
+        for (var i = 0; i < shapes.Length; i++)
         {
-            for (var j = i + 1; j < rectangles.Length; j++)
-            { 
-                rectangles[i]
-                    .IntersectsWith(rectangles[j])
+            for (var j = i + 1; j < shapes.Length; j++)
+            {
+                shapes[i]
+                    .IntersectsWith(shapes[j])
                     .Should()
-                    .BeFalse( $"Прямоугольники {i} и {j} не пересекаются");
+                    .BeFalse($"The shapes {i} and {j} do not intersect");
             }
         }
     }
@@ -95,16 +118,18 @@ public class CircularCloudLayouterTests
         double maxRatio)
     {
         var size = new Size(width, height);
-        
+
         for (var i = 0; i < rectanglesCount; i++)
-            _layouter.PutNextRectangle(size);
+            _layouter.PutNextShape(size);
 
-        var rectangles = _layouter.Rectangles.ToArray();
+        var rectangleShapes = _layouter.Shapes
+            .Cast<RectangleCloudShape>()
+            .ToArray();
 
-        var minX = rectangles.Min(r => r.Left);
-        var maxX = rectangles.Max(r => r.Right);
-        var minY = rectangles.Min(r => r.Top);
-        var maxY = rectangles.Max(r => r.Bottom);
+        var minX = rectangleShapes.Min(s => s.BoundingBox.Left);
+        var maxX = rectangleShapes.Max(s => s.BoundingBox.Right);
+        var minY = rectangleShapes.Min(s => s.BoundingBox.Top);
+        var maxY = rectangleShapes.Max(s => s.BoundingBox.Bottom);
 
         var boundingWidth = maxX - minX;
         var boundingHeight = maxY - minY;
@@ -113,7 +138,8 @@ public class CircularCloudLayouterTests
 
         ratio
             .Should()
-            .BeLessThanOrEqualTo(1.5, "Прямоугольник, ограничивающий облако не должен быть сильно вытянутым");
+            .BeLessThanOrEqualTo(maxRatio,
+                "The rectangle that bounds the cloud should not be too elongated");
     }
 
     [TestCase(30, 20, 50,
@@ -127,14 +153,12 @@ public class CircularCloudLayouterTests
     {
         var size = new Size(width, height);
         for (var i = 0; i < alreadyPlacedCount; i++)
-            _layouter.PutNextRectangle(size);
+            _layouter.PutNextShape(size);
         
-        var lastRectangle = _layouter.PutNextRectangle(size);
-        var rectangles = _layouter.Rectangles.ToArray();
+        var lastShape = _layouter.PutNextShape(size);
+        var shapes = _layouter.Shapes.ToArray();
 
-        var lastCenter = new Point(
-            lastRectangle.Left + lastRectangle.Width / 2,
-            lastRectangle.Top + lastRectangle.Height / 2);
+        var lastCenter = lastShape.Center;
 
         var dx = 0;
         if (lastCenter.X > _center.X) dx = -1;
@@ -148,16 +172,42 @@ public class CircularCloudLayouterTests
 
         if (dx != 0 || dy != 0)
         {
-            var shifted = new Rectangle(
-                new Point(lastRectangle.Left + dx, lastRectangle.Top + dy),
-                lastRectangle.Size);
+            var shifted = lastShape.Shift(dx, dy);
 
-            canBeShifted = !rectangles
-                .Where(r => r != lastRectangle)
-                .Any(r => r.IntersectsWith(shifted));
+            canBeShifted = !shapes
+                .Where(s => s != lastShape)
+                .Any(s => s.IntersectsWith(shifted));
         }
+
         canBeShifted
             .Should()
-            .BeFalse("Алгоритм должен прижать прямоугольник максимально близко к центру");
+            .BeFalse("The algorithm should push the rectangle as close to the center as possible");
+    }
+    
+    [Test]
+    public void TearDown_ShouldSaveVisualization_WhenTestFails()
+    {
+        var expectedFile = Path.Combine(_failDirectory,
+            $"{TestContext.CurrentContext.Test.Name}.png");
+        if (File.Exists(expectedFile))
+            File.Delete(expectedFile);//тут есть вариант не удалять, а например указывать время/дату в названии визуализации
+
+        _layouter.PutNextShape(new Size(30, 20));
+        
+        true.Should().BeFalse("Force failure to check TearDown saving");
+    }
+    
+    [TearDown]
+    public void TearDown()
+    {
+        if (TestContext.CurrentContext.Result.Outcome.Status != TestStatus.Failed)
+            return;
+
+        var fileName = $"{TestContext.CurrentContext.Test.Name}.png";
+        var path = Path.Combine(_failDirectory, fileName);
+
+        CloudVisualizer.SaveCloudImage(_layouter, ImageWidth, ImageHeight, path);
+
+        TestContext.Progress.WriteLine($"Tag cloud visualization saved to file {path}");
     }
 }

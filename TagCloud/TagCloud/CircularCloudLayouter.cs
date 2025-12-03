@@ -1,89 +1,73 @@
 ﻿using System.Drawing;
+using TagCloud.Creators;
+using TagCloud.Shapes;
+using TagCloud.SpiralGenerators;
 
 namespace TagCloud;
-public class CircularCloudLayouter(Point center)
+public class CircularCloudLayouter(
+    Point center, 
+    ISpiralPointGenerator generator,  
+    ICloudShapeCreator shapeCreator)
 {
-    private readonly List<Rectangle> _rectangles = [];
-    private readonly ArchimedeanSpiralPointGenerator _generator = new(center);
+    private readonly List<ICloudShape> _shapes = [];
 
-    public IReadOnlyCollection<Rectangle> Rectangles => _rectangles.AsReadOnly();
+    public IReadOnlyCollection<ICloudShape> Shapes => _shapes.AsReadOnly();
     
-    public Rectangle PutNextRectangle(Size rectangleSize)
+    public ICloudShape PutNextShape(Size size)
     {
-        if (rectangleSize.Width <= 0 || rectangleSize.Height <= 0) 
-            throw new ArgumentException("Rectangle size must be greater than zero");
+        if (size.Width <= 0 || size.Height <= 0) 
+            throw new ArgumentException("Shape size must be greater than zero");
         
-        Rectangle rectangle;
+        ICloudShape shape;
 
-        if (_rectangles.Count == 0)
-            rectangle = CreateRectangleWithCenter(center, rectangleSize);
-        
+        if (_shapes.Count == 0)
+            shape = shapeCreator.Create(center, size);
         else
         {
-            rectangle = FindPlaceForRectangle(rectangleSize);
-            rectangle = ShiftRectangleToCenter(rectangle);
+            shape = FindPlaceForShape(size);
+            shape = ShiftShapeToCenter(shape);
         }
 
-        _rectangles.Add(rectangle);
-        return rectangle;
+        _shapes.Add(shape);
+        return shape;
     }
     
-    private static Rectangle CreateRectangleWithCenter(Point center, Size size)
-    {
-        var left = center.X - size.Width / 2;
-        var top = center.Y - size.Height / 2;
-        return new Rectangle(new Point(left, top), size);
-    }
-    
-    private Rectangle FindPlaceForRectangle(Size size)
+    private ICloudShape FindPlaceForShape(Size size)
     {
         while (true)
         {
-            var pointOnSpiral = _generator.GetNextPointOnSpiral();
-            var rectangle = CreateRectangleWithCenter(pointOnSpiral, size);
+            var pointOnSpiral = generator.GetNextPointOnSpiral();
+            var newShape = shapeCreator.Create(pointOnSpiral, size);
 
-            if (!_rectangles.Any(r => r.IntersectsWith(rectangle)))
-                return rectangle;
+            if (!_shapes.Any(s => s.IntersectsWith(newShape)))
+                return newShape;
         }
     }
-    
-    private Rectangle ShiftRectangleToCenter(Rectangle rectangle)
+
+    private ICloudShape ShiftShapeToCenter(ICloudShape shape)
     {
         while (true)
         {
-            var direction = GetDirectionToCenter(rectangle);
+            var direction = GetDirectionToCenter(shape);
 
             if (direction == Point.Empty)
-                return rectangle;
+                return shape;
 
-            var shifted = new Rectangle(
-                new Point(rectangle.Left + direction.X, rectangle.Top + direction.Y),
-                rectangle.Size);
+            var shifted = shape.Shift(direction.X, direction.Y);
 
-            if (_rectangles.Any(r => r.IntersectsWith(shifted)))
-                return rectangle;
+            if (_shapes.Any(s => s.IntersectsWith(shifted)))
+                return shape;
 
-            rectangle = shifted;
+            shape = shifted;
         }
     }
-    
-    private Point GetDirectionToCenter(Rectangle rectangle)
+
+    private Point GetDirectionToCenter(ICloudShape shape)
     {
-        var rectangleCenter = new Point(
-            rectangle.Left + rectangle.Width / 2,
-            rectangle.Top + rectangle.Height / 2);
+        var shapeCenter = shape.Center;
 
-        var dx = 0;
-        if (rectangleCenter.X > center.X)
-            dx = -1;
-        else if (rectangleCenter.X < center.X)
-            dx = 1;
-
-        var dy = 0;
-        if (rectangleCenter.Y > center.Y)
-            dy = -1;
-        else if (rectangleCenter.Y < center.Y)
-            dy = 1;
+        var dx = shapeCenter.X > center.X ? -1 : shapeCenter.X < center.X ? 1 : 0;
+        var dy = shapeCenter.Y > center.Y ? -1 : shapeCenter.Y < center.Y ? 1 : 0;
 
         return new Point(dx, dy);
     }

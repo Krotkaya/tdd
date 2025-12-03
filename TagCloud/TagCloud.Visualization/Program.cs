@@ -1,5 +1,8 @@
 ﻿using System.Drawing;
 using SkiaSharp;
+using TagCloud.Creators;
+using TagCloud.Shapes;
+using TagCloud.SpiralGenerators;
 
 namespace TagCloud.Visualization;
 
@@ -57,65 +60,16 @@ internal static class Program
         Func<Random, Size> sizeFactory)
     {
         var center = new Point(imageWidth / 2, imageHeight / 2);
-        var layouter = new CircularCloudLayouter(center);
+        var generator = new ArchimedeanSpiralPointGenerator(center);
+        var shapeCreator = new RectangleCloudShapeCreator(); 
+        var layouter = new CircularCloudLayouter(center, generator, shapeCreator);
         var random = new Random(1);
 
         for (var i = 0; i < rectanglesCount; i++)
         {
             var size = sizeFactory(random);
-            layouter.PutNextRectangle(size);
+            layouter.PutNextShape(size);
         }
-        SaveCloudImage(layouter, imageWidth, imageHeight, filePath);
-    }
-
-    private static void SaveCloudImage(
-        CircularCloudLayouter layouter,
-        int width,
-        int height,
-        string filePath)
-    {
-        var info = new SKImageInfo(width, height);
-        using var surface = SKSurface.Create(info);
-        var canvas = surface.Canvas;
-
-        canvas.Clear(SKColors.Azure);
-
-        using (var centerPaint = new SKPaint())
-        {
-            centerPaint.Color = SKColors.Black;
-            centerPaint.StrokeWidth = 1;
-            centerPaint.IsAntialias = true;
-            canvas.DrawLine(width / 2f, 0, width / 2f, height, centerPaint);
-            canvas.DrawLine(0, height / 2f, width, height / 2f, centerPaint);
-        }
-
-        using var rectangleFill = new SKPaint();
-        rectangleFill.Color = new SKColor(0, 255, 0, 40);
-        rectangleFill.Style = SKPaintStyle.Fill;
-        rectangleFill.IsAntialias = true;
-
-        using var rectanglStroke = new SKPaint();
-        rectanglStroke.Color = SKColors.DarkGreen;
-        rectanglStroke.Style = SKPaintStyle.Stroke;
-        rectanglStroke.StrokeWidth = 1;
-        rectanglStroke.IsAntialias = true;
-
-        foreach (var rectangle in layouter.Rectangles)
-        {
-            var r = new SKRect(
-                rectangle.Left,
-                rectangle.Top,
-                rectangle.Right,
-                rectangle.Bottom);
-
-            canvas.DrawRect(r, rectangleFill);
-            canvas.DrawRect(r, rectanglStroke);
-        }
-
-        using var image = surface.Snapshot();
-        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
-
-        using var stream = File.Open(filePath, FileMode.Create, FileAccess.Write);
-        data.SaveTo(stream);
+        CloudVisualizer.SaveCloudImage(layouter, imageWidth, imageHeight, filePath);
     }
 }
